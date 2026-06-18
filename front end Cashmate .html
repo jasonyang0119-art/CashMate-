@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Échecs - Mises Réelles</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #2f3136; color: white; }
+        #board { width: 400px; margin: 20px; }
+        .info { margin-bottom: 10px; font-size: 1.2rem; }
+    </style>
+</head>
+<body>
+
+    <div class="info">Statut du match : <span id="status">En attente de connexion...</span></div>
+    <div id="board"></div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+    
+    <script>
+        // Connexion au serveur de jeu (Node.js)
+        const ws = new WebSocket('ws://localhost:8080');
+        const game = new Chess();
+        let board = null;
+        let playerColor = 'w'; // 'w' pour blanc, 'b' pour noir (attribué par le serveur)
+
+        function onDragStart (source, piece, position, orientation) {
+            // Interdire de bouger les pièces si le jeu est fini ou si ce n'est pas la couleur du joueur
+            if (game.game_over()) return false;
+            if ((playerColor === 'w' && piece.search(/^b/) !== -1) ||
+                (playerColor === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+        }
+
+        function onDrop (source, target) {
+            // Tenter le mouvement localement
+            let move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q' // promotion automatique en reine pour simplifier
+            });
+
+            // Si le mouvement est illégal
+            if (move === null) return 'snapback';
+
+            // Envoyer le mouvement au serveur
+            ws.send(JSON.stringify({ type: 'move', from: source, to: target }));
+            updateStatus();
+        }
+
+        function onSnapEnd () {
+            board.position(game.fen());
+        }
+
+        function updateStatus() {
+            let status = '';
+            let moveColor = (game.turn() === 'b') ? 'Noirs' : 'Blancs';
+
+            if (game.in_checkmate()) {
+                status = 'Match terminé. ' + moveColor + ' est mat.';
+            } else if (game.in_draw()) {
+                status = 'Match terminé. Égalité (Nulle).';
+            } else {
+                status = 'Au tour des ' + moveColor;
+                if (game.in_check()) {
+                    status += ' (Échec !)';
+                }
+            }
+            $('#status').text(status);
+        }
+
+        // Gestion des messages reçus du serveur
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'init') {
+                playerColor = data.color;
+                board.orientation(playerColor === 'w' ? 'white' : 'black');
+                $('#status').text('Match commencé ! Vous jouez les ' + (playerColor === 'w' ? 'Blancs' : 'Noirs'));
+            } else if (data.type === 'move') {
+                game.move({ from: data.from, to: data.to, promotion: 'q' });
+                board.position(game.fen());
+                updateStatus();
+            }
+        };
+
+        // Initialisation de l'échiquier graphique
+        board = Chessboard('board', {
+            draggable: true,
+            position: 'start',
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onSnapEnd: onSnapEnd
+        });
+    </script>
+</body>
+</html>
